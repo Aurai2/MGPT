@@ -1,9 +1,0 @@
-
-streamlit
-pandas
-numpy
-scikit-learn
-sentence-transformers
-scipy
-pyarrow
-joblib
