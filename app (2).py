@@ -19,13 +19,13 @@ def install_and_import(package: str):
 install_and_import("gdown")
 import gdown  # noqa: E402
 
-# Map artifact filenames to Google Drive file IDs (REPLACE the placeholders below)
+# Map artifact filenames to Google Drive file IDs 
 GDRIVE = {
-    "phase2_best_rf.joblib": "FILE_ID_MODEL",
-    "phase2_meta.joblib": "FILE_ID_META",
-    "phase1_features.parquet": "FILE_ID_P1",
-    "steel_dataset 1.csv": "FILE_ID_REF",
-    "rf_feature_importances.csv": "FILE_ID_FI",  # optional; leave as-is if you don't use it
+    "phase2_best_rf.joblib": "1VYGciGkSXSZA8ispaOet0VlT359Tvwu4", 
+    "phase2_meta.joblib": "12GxNNmk5qrWQZmL5lP36pjCEkNR-on_G", 
+    "phase1_features.parquet": "1xeS9XbxfDeEGBd8wIsgG7fzb5Ib8ky0c", 
+    "steel_dataset 1.csv": "1yM2DAvkirtO0acUjWBPBRAjXl04guYp7", 
+    "rf_feature_importances.csv": "1_0dUQsfQdtjfIfZq6CTjc98VfulTEAh4",  
 }
 
 # Download any missing files
@@ -38,17 +38,17 @@ for fname, fid in list(GDRIVE.items()):
 # =============================
 # App config
 # =============================
-APP_TITLE = "SteelsGPT – Phase-3 (GDrive-backed artifacts + process text search)"
+APP_TITLE = "SteelsGPT"
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# Default file locations (you can override via env or sidebar if needed)
+# Default file locations 
 MODEL_PATH   = os.environ.get("MODEL_PATH",   "phase2_best_rf.joblib").strip()
 META_PATH    = os.environ.get("META_PATH",    "phase2_meta.joblib").strip()
 P1_PARQUET   = os.environ.get("P1_PARQUET",   "phase1_features.parquet").strip()
 REF_CSV      = os.environ.get("REF_CSV",      "steel_dataset 1.csv").strip()
 FI_CSV       = os.environ.get("FI_CSV",       "rf_feature_importances.csv").strip()
 
-# 18-element composition UI schema (you can type fewer; missing ones default to 0.0)
+# 18-element composition UI scheme
 DEFAULT_COMP = {
     "Al": 0.00, "Cu": 0.00, "Mn": 1.00, "N": 0.00,
     "Ni": 0.30, "Ti": 0.00, "S": 0.00, "Fe": 97.00,
@@ -300,7 +300,7 @@ fi_df = pd.read_csv(FI_CSV) if Path(FI_CSV).exists() else pd.DataFrame()
 # -----------------------
 # UI
 # -----------------------
-st.title("SteelsGPT – Phase-3")
+st.title("SteelsGPT")
 with st.sidebar:
     st.subheader("Files (downloaded from Drive if missing)")
     st.caption(f"Model: {MODEL_PATH}")
@@ -394,7 +394,7 @@ with right:
                 st.download_button("⬇️ Download suggestions", ranked.to_csv(index=False).encode("utf-8"),
                                    "suggested_alloys.csv", "text/csv")
 
-# Optional: quick view of feature importances if provided
+# Quick view of feature importances if provided
 if Path(FI_CSV).exists():
     try:
         fi_df = pd.read_csv(FI_CSV)
