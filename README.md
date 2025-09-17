@@ -26,5 +26,3 @@ Adithya Umanath Rai, Kiran Devraju, Jose Thomson
    - Optional: feature importance ranking for additional information
 
 ---
-
-## 📂 Repo Structure
