@@ -426,7 +426,3 @@ if Path(FI_CSV).exists():
     except Exception:
         pass
 """
-
-out = Path("/mnt/data/app(2).py")
-out.write_text(app_code)
-out
