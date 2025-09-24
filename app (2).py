@@ -1,4 +1,3 @@
-# Build updated app.py with requested UI and behavior changes
 import os, io, re, sys, subprocess
 from pathlib import Path
 from typing import List, Dict, Any
@@ -20,7 +19,7 @@ def install_and_import(package: str):
 install_and_import("gdown")
 import gdown  # noqa: E402
 
-# Map artifact filenames to Google Drive file IDs
+# Map artifact filenames to Google Drive file IDs (REPLACE the placeholders below)
 GDRIVE = {
     "phase2_best_rf.joblib": "1VYGciGkSXSZA8ispaOet0VlT359Tvwu4",
     "phase2_meta.joblib": "12GxNNmk5qrWQZmL5lP36pjCEkNR-on_G",
@@ -39,17 +38,17 @@ for fname, fid in list(GDRIVE.items()):
 # =============================
 # App config
 # =============================
-APP_TITLE = "SteelsGPT"
+APP_TITLE = "SteelsGPT – Phase-3 (GDrive-backed artifacts + process text search)"
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-# Default file locations
+# Default file locations (you can override via env or sidebar if needed)
 MODEL_PATH   = os.environ.get("MODEL_PATH",   "phase2_best_rf.joblib").strip()
 META_PATH    = os.environ.get("META_PATH",    "phase2_meta.joblib").strip()
 P1_PARQUET   = os.environ.get("P1_PARQUET",   "phase1_features.parquet").strip()
 REF_CSV      = os.environ.get("REF_CSV",      "steel_dataset 1.csv").strip()
 FI_CSV       = os.environ.get("FI_CSV",       "rf_feature_importances.csv").strip()
 
-# 18-element composition UI scheme
+# 18-element composition UI schema (you can type fewer; missing ones default to 0.0)
 DEFAULT_COMP = {
     "Al": 0.00, "Cu": 0.00, "Mn": 1.00, "N": 0.00,
     "Ni": 0.30, "Ti": 0.00, "S": 0.00, "Fe": 97.00,
@@ -96,7 +95,7 @@ def load_model_and_meta(model_path: str, meta_path: str):
 
 @st.cache_data(show_spinner=False)
 def load_phase1_centroids(parquet_path: str, expected_p1_cols: List[str]):
-    \"\"\"Compute per-cluster centroids from the Phase-1 parquet. No file is modified.\"\"\"
+    """Compute per-cluster centroids from the Phase-1 parquet. No file is modified."""
     if not parquet_path or not Path(parquet_path).exists():
         return None, None, []
     p1 = pd.read_parquet(parquet_path)
@@ -151,7 +150,7 @@ def build_feature_row(feature_order: List[str],
                       cluster_id: int | None,
                       centroids: pd.DataFrame | None,
                       phase1_cols: List[str]):
-    \"\"\"Build the exact input vector Phase-2 trained on. Uses comp + inferred Phase-1 features.\"\"\"
+    """Build the exact input vector Phase-2 trained on. Uses comp + inferred Phase-1 features."""
     row = {f: float(comp.get(f, 0.0)) for f in feature_order}
 
     # cl_* one-hots if present
@@ -177,7 +176,7 @@ def build_feature_row(feature_order: List[str],
 
 # ---- process text search (for suggested alloy ranking) ----
 def tokenize_query(q: str) -> List[str]:
-    parts = re.findall(r'"([^"]+)"|(\\S+)', q)
+    parts = re.findall(r'"([^"]+)"|(\S+)', q)
     terms = [p[0] or p[1] for p in parts]
     return [t.strip() for t in terms if t.strip()]
 
@@ -205,7 +204,7 @@ def rank_suggestions(ref_df: pd.DataFrame,
                      query: str,
                      query_mode: str,
                      topk: int = 10):
-    \"\"\"Rank alloys by: text match score (from query) + composition closeness + (optional) property closeness.\"\"\"
+    """Rank alloys by: text match score (from query) + composition closeness + (optional) property closeness."""
     if ref_df.empty:
         return pd.DataFrame()
 
@@ -218,13 +217,13 @@ def rank_suggestions(ref_df: pd.DataFrame,
         tx = df[process_text_col].fillna("").astype(str)
         if rx:
             # base: count total matched characters; boost exact numbers (e.g., 870)
-            nums = re.findall(r"\\d+\\.?\\d*", query)
+            nums = re.findall(r"\d+\.?\d*", query)
             def s(txt):
                 hits = [m.group(0) for m in re.finditer(re.compile("|".join([re.escape(t) for t in terms]), re.I), txt)]
                 base = sum(len(h) for h in hits)
                 boost = 0
                 for n in nums:
-                    if re.search(rf"(?i)\\b{re.escape(n)}\\b", txt): boost += 100
+                    if re.search(rf"(?i)\b{re.escape(n)}\b", txt): boost += 100
                 return base + boost
             text_score = tx.apply(s).to_numpy()
             df["match_excerpt"] = tx.apply(lambda t: excerpt(t, rx))
@@ -301,10 +300,7 @@ fi_df = pd.read_csv(FI_CSV) if Path(FI_CSV).exists() else pd.DataFrame()
 # -----------------------
 # UI
 # -----------------------
-st.title("SteelsGPT")
-st.write("Use this interactive site to predict the properties of steels and ferrous alloys. "
-         "This site utilises machine learning for forward predictions.")
-
+st.title("SteelsGPT – Phase-3")
 with st.sidebar:
     st.subheader("Files (downloaded from Drive if missing)")
     st.caption(f"Model: {MODEL_PATH}")
@@ -317,27 +313,12 @@ with st.sidebar:
     else:
         st.caption(f"Phase-1 features in model: {len(p1_expected)}")
 
+# Inputs
 left, right = st.columns([0.62, 0.38])
-
 with left:
-    # ---- Composition first ----
-    st.subheader("Select alloy composition, in wt. %")
-    st.caption("(*note, the Fe content will automatically balance the composition to 100%)")
-
-    cols = st.columns(6)
-    comp = {}
-    for i, (elem, default) in enumerate(DEFAULT_COMP.items()):
-        with cols[i % 6]:
-            comp[elem] = st.number_input(elem, min_value=0.0, max_value=100.0, value=float(default), step=0.01)
-
-    # Compute Fe balance preview
-    sum_except_fe = sum(v for k, v in comp.items() if k != "Fe")
-    fe_bal = max(0.0, 100.0 - sum_except_fe)
-    st.caption(f"Fe will be set to **{fe_bal:.2f} wt.%** to balance to 100%.")
-
-    # ---- Processing second ----
-    st.subheader("Select alloy processing condition")
-    use_cluster = st.checkbox("Uncheck if you do not wish to use alloy processing as an input", value=True)
+    st.subheader("Inputs")
+    # Cluster selection with descriptions
+    use_cluster = st.checkbox("Use processing cluster", value=True)
     cluster_id = None
     if use_cluster:
         cluster_id = st.selectbox(
@@ -348,17 +329,18 @@ with left:
         )
         st.caption(f"Selected: **Cluster {cluster_id} — {CODE2LABEL.get(cluster_id, '—')}**")
 
-    # ---- Optional free-text process terms ----
-    st.subheader("(optional) Process text (user entries possible for processing)")
-    st.caption("Use drop down processing selection, or user entry for processing")
-    process_query = st.text_input('', "", placeholder='e.g. "cold drawn" 870 degrees pseudo-carburized')
-    # keep the radio but hide label by using empty string; default AND
-    query_mode = st.radio("", ["AND","OR"], index=0, horizontal=True)
+    cols = st.columns(6)
+    comp = {}
+    for i, (elem, default) in enumerate(DEFAULT_COMP.items()):
+        with cols[i % 6]:
+            comp[elem] = st.number_input(elem, min_value=0.0, max_value=100.0, value=float(default), step=0.01)
+
+    # Process text search that will influence suggested alloys
+    st.markdown("#### Process text (influences **suggested** alloy ranking)")
+    process_query = st.text_input('e.g. "cold drawn" 870 degrees pseudo-carburized', "")
+    query_mode = st.radio("Match mode", ["AND","OR"], index=0, horizontal=True)
 
     if st.button("Predict", type="primary"):
-        # Apply Fe balance
-        comp["Fe"] = fe_bal
-
         # Build input row strictly in the saved feature order
         row = build_feature_row(feature_order, comp, cluster_id, centroids if use_cluster else None, phase1_cols)
         X = pd.DataFrame([row], columns=feature_order).astype(float)
@@ -383,18 +365,15 @@ with right:
     if preds is None:
         st.info("Set inputs and click **Predict**.")
     else:
-        # Show metrics with 1 decimal place
+        # Display using target names from meta (don’t assume fixed names)
         cols = st.columns(len(target_names))
         for i, t in enumerate(target_names):
             with cols[i]:
                 val = preds.get(t, None)
-                if isinstance(val, (int, float)):
-                    st.metric(t, f"{val:.1f}")
-                else:
-                    st.metric(t, f"{val}")
+                st.metric(t, f"{val:.3f}" if isinstance(val, (int,float)) else f"{val}")
 
-        # Suggested alloys (updated heading)
-        st.markdown("### Suggested matching alloys from training database")
+        # Suggested alloys (influenced by process text, composition, and predicted props if present)
+        st.markdown("### Suggested alloys")
         if ref_df.empty:
             st.info("Reference CSV not found or empty. Put your dataset at `steel_dataset 1.csv` or set REF_CSV.")
         else:
