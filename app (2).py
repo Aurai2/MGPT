@@ -19,14 +19,16 @@ def install_and_import(package: str):
 install_and_import("gdown")
 import gdown  # noqa: E402
 
-# Map artifact filenames to Google Drive file IDs  (these are yours; change if needed)
+# Map artifact filenames to Google Drive file IDs (update as needed)
 GDRIVE = {
-    "phase2_best_rf.joblib": "1VYGciGkSXSZA8ispaOet0VlT359Tvwu4",
+    # <-- paste your new ID for phase2_best_rf.joblib here
+    "phase2_best_rf.joblib": "1VYGciGkSXSZA8ispaOet0VlT359Tvwu4",  
     "phase2_meta.joblib":    "12GxNNmk5qrWQZmL5lP36pjCEkNR-on_G",
     "phase1_features.parquet": "1xeS9XbxfDeEGBd8wIsgG7fzb5Ib8ky0c",
     "steel_dataset 1.csv":   "1yM2DAvkirtO0acUjWBPBRAjXl04guYp7",
     "rf_feature_importances.csv": "1_0dUQsfQdtjfIfZq6CTjc98VfulTEAh4",  # optional
 }
+
 
 # Download any missing files (kept as before)
 for fname, fid in list(GDRIVE.items()):
