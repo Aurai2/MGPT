@@ -1,4 +1,4 @@
-import os, io, re, sys, subprocess
+import os, re, sys, subprocess
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -19,36 +19,40 @@ def install_and_import(package: str):
 install_and_import("gdown")
 import gdown  # noqa: E402
 
-# Map artifact filenames to Google Drive file IDs (REPLACE the placeholders below)
+# Map artifact filenames to Google Drive file IDs  (these are yours; change if needed)
 GDRIVE = {
     "phase2_best_rf.joblib": "1VYGciGkSXSZA8ispaOet0VlT359Tvwu4",
-    "phase2_meta.joblib": "12GxNNmk5qrWQZmL5lP36pjCEkNR-on_G",
+    "phase2_meta.joblib":    "12GxNNmk5qrWQZmL5lP36pjCEkNR-on_G",
     "phase1_features.parquet": "1xeS9XbxfDeEGBd8wIsgG7fzb5Ib8ky0c",
-    "steel_dataset 1.csv": "1yM2DAvkirtO0acUjWBPBRAjXl04guYp7",
-    "rf_feature_importances.csv": "1_0dUQsfQdtjfIfZq6CTjc98VfulTEAh4",
+    "steel_dataset 1.csv":   "1yM2DAvkirtO0acUjWBPBRAjXl04guYp7",
+    "rf_feature_importances.csv": "1_0dUQsfQdtjfIfZq6CTjc98VfulTEAh4",  # optional
 }
 
-# Download any missing files
+# Download any missing files (kept as before)
 for fname, fid in list(GDRIVE.items()):
     if fid and not Path(fname).exists():
         url = f"https://drive.google.com/uc?id={fid}"
-        print(f"[gdown] Downloading {fname} ...")
         gdown.download(url, fname, quiet=False)
 
 # =============================
 # App config
 # =============================
-APP_TITLE = "SteelsGPT – Phase-3 (GDrive-backed artifacts + process text search)"
+APP_TITLE = "SteelsGPT"
 st.set_page_config(page_title=APP_TITLE, layout="wide")
+st.title("SteelsGPT")
+st.caption(
+    "Use this interactive site to predict the properties of steels and ferrous alloys. "
+    "This site utilises machine learning for forward predictions."
+)
 
-# Default file locations (you can override via env or sidebar if needed)
-MODEL_PATH   = os.environ.get("MODEL_PATH",   "phase2_best_rf.joblib").strip()
-META_PATH    = os.environ.get("META_PATH",    "phase2_meta.joblib").strip()
-P1_PARQUET   = os.environ.get("P1_PARQUET",   "phase1_features.parquet").strip()
-REF_CSV      = os.environ.get("REF_CSV",      "steel_dataset 1.csv").strip()
-FI_CSV       = os.environ.get("FI_CSV",       "rf_feature_importances.csv").strip()
+# Default file locations (same names you trained/exported)
+MODEL_PATH   = os.environ.get("MODEL_PATH", "phase2_best_rf.joblib").strip()
+META_PATH    = os.environ.get("META_PATH",  "phase2_meta.joblib").strip()
+P1_PARQUET   = os.environ.get("P1_PARQUET", "phase1_features.parquet").strip()
+REF_CSV      = os.environ.get("REF_CSV",    "steel_dataset 1.csv").strip()
+FI_CSV       = os.environ.get("FI_CSV",     "rf_feature_importances.csv").strip()
 
-# 18-element composition UI schema (you can type fewer; missing ones default to 0.0)
+# Composition schema (18 elements)
 DEFAULT_COMP = {
     "Al": 0.00, "Cu": 0.00, "Mn": 1.00, "N": 0.00,
     "Ni": 0.30, "Ti": 0.00, "S": 0.00, "Fe": 97.00,
@@ -79,28 +83,25 @@ CODE2LABEL = {c["code"]: c["label"] for c in CLUSTERS_K12}
 # -----------------------
 def load_model_and_meta(model_path: str, meta_path: str):
     if not Path(model_path).exists():
-        st.error(f"Model file not found: {model_path}")
-        st.stop()
+        st.error(f"Model file not found: {model_path}"); st.stop()
     if not Path(meta_path).exists():
-        st.error(f"Meta file not found: {meta_path}")
-        st.stop()
+        st.error(f"Meta file not found: {meta_path}"); st.stop()
     model = joblib.load(model_path)
     meta  = joblib.load(meta_path)
     features: List[str] = meta.get("features", [])
     targets:  List[str] = meta.get("targets", ["ultimate_tensile","yield","ductility"])
     if not features:
-        st.error("Meta file missing `features`; cannot build the input vector.")
-        st.stop()
+        st.error("Meta file missing `features`; cannot build the input vector."); st.stop()
     return model, features, targets
 
 @st.cache_data(show_spinner=False)
 def load_phase1_centroids(parquet_path: str, expected_p1_cols: List[str]):
-    """Compute per-cluster centroids from the Phase-1 parquet. No file is modified."""
+    """Compute per-cluster centroids from the Phase-1 parquet (no file is modified)."""
     if not parquet_path or not Path(parquet_path).exists():
         return None, None, []
     p1 = pd.read_parquet(parquet_path)
 
-    # Which column indicates cluster id?
+    # Detect cluster id column
     clcol = None
     for cand in ["macro_cluster", "cluster_id", "cluster", "k_label"]:
         if cand in p1.columns:
@@ -108,10 +109,10 @@ def load_phase1_centroids(parquet_path: str, expected_p1_cols: List[str]):
     if clcol is None:
         return None, None, []
 
-    # Phase-1 columns the model expects (present in parquet)
+    # Filter to Phase-1 columns that the model expects
     p1_cols = [c for c in expected_p1_cols if c in p1.columns]
 
-    # Ensure all expected Phase-1 columns exist (fill missing with zeros for centroid calc)
+    # Ensure missing expected cols exist for mean calc
     for c in expected_p1_cols:
         if c not in p1.columns:
             p1[c] = 0.0
@@ -128,6 +129,7 @@ def load_reference_csv(path: str):
     if not path or not Path(path).exists():
         return pd.DataFrame()
     # try common encodings
+    df = None
     for enc in ["utf-8", "ISO-8859-1", "latin1"]:
         try:
             df = pd.read_csv(path, encoding=enc)
@@ -136,7 +138,7 @@ def load_reference_csv(path: str):
             df = None
     if df is None:
         return pd.DataFrame()
-    # ensure we have an alloy name column
+    # ensure name column
     if "alloy_name" not in df.columns:
         for alt in ["name","grade","label","steel_name","designation"]:
             if alt in df.columns:
@@ -150,17 +152,18 @@ def build_feature_row(feature_order: List[str],
                       cluster_id: int | None,
                       centroids: pd.DataFrame | None,
                       phase1_cols: List[str]):
-    """Build the exact input vector Phase-2 trained on. Uses comp + inferred Phase-1 features."""
+    """Build the exact model input: composition + Phase-1 features and cl_* one-hots."""
     row = {f: float(comp.get(f, 0.0)) for f in feature_order}
 
-    # cl_* one-hots if present
+    # cl_* one-hots if present in model features
     cl_cols = [c for c in feature_order if c.startswith("cl_")]
     if cl_cols:
-        for c in cl_cols: row[c] = 0.0
+        for c in cl_cols:
+            row[c] = 0.0
         if cluster_id is not None and f"cl_{int(cluster_id)}" in cl_cols:
             row[f"cl_{int(cluster_id)}"] = 1.0
 
-    # Inject Phase-1 centroids for any route__/tag__/form__/proc_pca_* columns the model expects
+    # Phase-1 centroid injection for route__/tag__/form__/proc_pca_* expected by model
     if centroids is not None and phase1_cols:
         if cluster_id is None and "cluster_id" in centroids.columns and len(centroids):
             sel = centroids.iloc[[0]]
@@ -185,7 +188,7 @@ def build_regex(terms: List[str], mode: str) -> re.Pattern | None:
     esc = [re.escape(t) for t in terms]
     if mode == "OR":
         return re.compile(r"(?i)(" + "|".join(esc) + r")")
-    # AND: require all via lookaheads
+    # AND requires all via lookaheads
     return re.compile(r"(?i)" + "".join([f"(?=.*{e})" for e in esc]))
 
 def excerpt(text: str, pattern: re.Pattern, radius: int = 50) -> str:
@@ -204,11 +207,12 @@ def rank_suggestions(ref_df: pd.DataFrame,
                      query: str,
                      query_mode: str,
                      topk: int = 10):
-    """Rank alloys by: text match score (from query) + composition closeness + (optional) property closeness."""
+    """Rank alloys by: text match + composition closeness + (optional) property closeness."""
     if ref_df.empty:
         return pd.DataFrame()
 
     df = ref_df.copy()
+
     # --- text score ---
     text_score = np.zeros(len(df), dtype=float)
     if process_text_col and process_text_col in df.columns and query.strip():
@@ -216,16 +220,13 @@ def rank_suggestions(ref_df: pd.DataFrame,
         rx = build_regex(terms, query_mode)
         tx = df[process_text_col].fillna("").astype(str)
         if rx:
-            # base: count total matched characters; boost exact numbers (e.g., 870)
-            nums = re.findall(r"\d+\.?\d*", query)
-            def s(txt):
+            nums = re.findall(r"\d+\.?\d*", query)  # boost exact numeric mentions
+            def score_txt(txt):
                 hits = [m.group(0) for m in re.finditer(re.compile("|".join([re.escape(t) for t in terms]), re.I), txt)]
                 base = sum(len(h) for h in hits)
-                boost = 0
-                for n in nums:
-                    if re.search(rf"(?i)\b{re.escape(n)}\b", txt): boost += 100
+                boost = sum(100 for n in nums if re.search(rf"(?i)\b{re.escape(n)}\b", txt))
                 return base + boost
-            text_score = tx.apply(s).to_numpy()
+            text_score = tx.apply(score_txt).to_numpy()
             df["match_excerpt"] = tx.apply(lambda t: excerpt(t, rx))
     else:
         df["match_excerpt"] = ""
@@ -237,25 +238,18 @@ def rank_suggestions(ref_df: pd.DataFrame,
         v = np.array([float(comp_input.get(c, 0.0)) for c in comp_cols], dtype=float)
         M = df[comp_cols].to_numpy(dtype=float)
         comp_dist = np.linalg.norm(M - v[None, :], axis=1)
-    # normalize to [0,1]
-    if comp_dist.max() > comp_dist.min():
-        comp_score = 1.0 - (comp_dist - comp_dist.min()) / (comp_dist.max() - comp_dist.min())
-    else:
-        comp_score = 1.0 - comp_dist
+    comp_score = 1.0 - ((comp_dist - comp_dist.min()) / (comp_dist.max() - comp_dist.min() + 1e-12))
 
-    # --- property distance (optional, uses predicted props from your RF) ---
+    # --- property distance (optional), uses predicted props
     prop_cols = [c for c in ["ultimate_tensile","yield","ductility"] if c in df.columns]
     prop_score = np.zeros(len(df), dtype=float)
     if pred_props and prop_cols and all(k in pred_props for k in ["ultimate_tensile","yield","ductility"]):
         v = np.array([float(pred_props.get(k, 0.0)) for k in prop_cols], dtype=float)
         M = df[prop_cols].to_numpy(dtype=float)
         d = np.linalg.norm(M - v[None, :], axis=1)
-        if d.max() > d.min():
-            prop_score = 1.0 - (d - d.min()) / (d.max() - d.min())
-        else:
-            prop_score = 1.0 - d
+        prop_score = 1.0 - ((d - d.min()) / (d.max() - d.min() + 1e-12))
 
-    # Final score: emphasize text if provided; otherwise comp+props
+    # Final score
     if query.strip():
         score = 0.60 * (text_score / (text_score.max() or 1.0)) + 0.25 * comp_score + 0.15 * prop_score
     else:
@@ -264,13 +258,12 @@ def rank_suggestions(ref_df: pd.DataFrame,
     out = df.copy()
     out["_score"] = score
     out = out.sort_values("_score", ascending=False).head(topk)
-    # choose preview columns
+
+    # Choose preview columns
     show_cols = []
-    # try to find a process/route column to display
     process_display_col = None
     for c in ["process","route","notes","treatment","processing","description"]:
-        if c in out.columns:
-            process_display_col = c; break
+        if c in out.columns: process_display_col = c; break
     for c in ["alloy_name", process_display_col, "match_excerpt", "_score",
               "ultimate_tensile","yield","ductility"]:
         if c and c in out.columns and c not in show_cols:
@@ -285,40 +278,54 @@ def rank_suggestions(ref_df: pd.DataFrame,
 # -----------------------
 model, feature_order, target_names = load_model_and_meta(MODEL_PATH, META_PATH)
 
-# Phase-1 columns the model expects (based on feature names)
+# Determine which Phase-1 features the model expects
 PHASE1_PREFIXES = ("cl_","route__","tag_","form_","proc_pca_")
 p1_expected = [c for c in feature_order if c.startswith(PHASE1_PREFIXES)]
-
 centroids, cluster_ids, phase1_cols = load_phase1_centroids(P1_PARQUET, p1_expected)
 
-# Reference dataset (for suggested alloys + process text)
+# Reference dataset (for suggested alloys + process text ranking)
 ref_df = load_reference_csv(REF_CSV)
 
-# Feature importances (optional)
+# Optional feature importances
 fi_df = pd.read_csv(FI_CSV) if Path(FI_CSV).exists() else pd.DataFrame()
 
 # -----------------------
 # UI
 # -----------------------
-st.title("SteelsGPT – Phase-3")
 with st.sidebar:
-    st.subheader("Files (downloaded from Drive if missing)")
+    st.subheader("Files")
     st.caption(f"Model: {MODEL_PATH}")
     st.caption(f"Meta: {META_PATH}")
     st.caption(f"Phase-1 parquet: {P1_PARQUET}")
     st.caption(f"Reference CSV: {REF_CSV}")
     if not p1_expected:
         st.info("Model appears to be composition-only (no Phase-1 feature names found). "
-                "Predictions will not depend on cluster.")
+                "Predictions will not depend on processing cluster.")
     else:
-        st.caption(f"Phase-1 features in model: {len(p1_expected)}")
+        st.caption(f"Phase-1 feature count expected by model: {len(p1_expected)}")
 
-# Inputs
 left, right = st.columns([0.62, 0.38])
+
 with left:
-    st.subheader("Inputs")
-    # Cluster selection with descriptions
-    use_cluster = st.checkbox("Use processing cluster", value=True)
+    # ---- Composition (FIRST) ----
+    st.subheader("Select alloy composition, in wt. %")
+    st.caption("(*note, the Fe content will automatically balance the composition to 100%*)")
+
+    cols = st.columns(6)
+    comp = {}
+    for i, (elem, default) in enumerate(DEFAULT_COMP.items()):
+        with cols[i % 6]:
+            comp[elem] = st.number_input(elem, min_value=0.0, max_value=100.0,
+                                         value=float(default), step=0.01)
+
+    # Fe auto-balance preview
+    sum_except_fe = sum(v for k, v in comp.items() if k != "Fe")
+    fe_bal = max(0.0, 100.0 - sum_except_fe)
+    st.caption(f"Fe will be set to **{fe_bal:.2f} wt.%** to balance to 100%.")
+
+    # ---- Processing (SECOND) ----
+    st.subheader("Select alloy processing condition")
+    use_cluster = st.checkbox("Uncheck if you do not wish to use alloy processing as an input", value=True)
     cluster_id = None
     if use_cluster:
         cluster_id = st.selectbox(
@@ -329,31 +336,32 @@ with left:
         )
         st.caption(f"Selected: **Cluster {cluster_id} — {CODE2LABEL.get(cluster_id, '—')}**")
 
-    cols = st.columns(6)
-    comp = {}
-    for i, (elem, default) in enumerate(DEFAULT_COMP.items()):
-        with cols[i % 6]:
-            comp[elem] = st.number_input(elem, min_value=0.0, max_value=100.0, value=float(default), step=0.01)
-
-    # Process text search that will influence suggested alloys
-    st.markdown("#### Process text (influences **suggested** alloy ranking)")
-    process_query = st.text_input('e.g. "cold drawn" 870 degrees pseudo-carburized', "")
-    query_mode = st.radio("Match mode", ["AND","OR"], index=0, horizontal=True)
+    # ---- (OPTIONAL) custom process text ----
+    st.subheader("(optional) Process text (user entries possible for processing)")
+    st.caption("Use drop down processing selection, or user entry for processing")
+    process_query = st.text_input('', "", placeholder='e.g. "cold drawn" 870 degrees pseudo-carburized')
+    # keep the radio (AND/OR) but hide the label
+    query_mode = st.radio("", ["AND","OR"], index=0, horizontal=True)
 
     if st.button("Predict", type="primary"):
-        # Build input row strictly in the saved feature order
-        row = build_feature_row(feature_order, comp, cluster_id, centroids if use_cluster else None, phase1_cols)
+        # enforce Fe balance on submit
+        comp["Fe"] = fe_bal
+
+        # Build model input row in the exact saved feature order
+        row = build_feature_row(
+            feature_order, comp,
+            cluster_id if use_cluster else None,
+            centroids if use_cluster else None,
+            phase1_cols
+        )
         X = pd.DataFrame([row], columns=feature_order).astype(float)
 
-        # Basic sanity
-        if X.isna().any().any():
-            bad = X.columns[X.isna().any()].tolist()
-            st.error(f"NaNs in model input: {bad}")
-            st.stop()
-
+        # Predict
         y_pred = model.predict(X)
         y_vec = np.array(y_pred).reshape(-1)
         preds = {t: float(v) for t, v in zip(target_names, y_vec)}
+
+        # Persist for right panel + suggestions
         st.session_state["preds"] = preds
         st.session_state["comp"] = comp
         st.session_state["process_query"] = process_query
@@ -365,36 +373,45 @@ with right:
     if preds is None:
         st.info("Set inputs and click **Predict**.")
     else:
-        # Display using target names from meta (don’t assume fixed names)
+        # Show targets (1 decimal place)
         cols = st.columns(len(target_names))
         for i, t in enumerate(target_names):
             with cols[i]:
                 val = preds.get(t, None)
-                st.metric(t, f"{val:.3f}" if isinstance(val, (int,float)) else f"{val}")
+                st.metric(t, f"{val:.1f}" if isinstance(val, (int, float)) else f"{val}")
 
-        # Suggested alloys (influenced by process text, composition, and predicted props if present)
-        st.markdown("### Suggested alloys")
+        # Suggested alloys (ranked)
+        st.markdown("### Suggested matching alloys from training database")
         if ref_df.empty:
-            st.info("Reference CSV not found or empty. Put your dataset at `steel_dataset 1.csv` or set REF_CSV.")
+            st.info("Reference CSV not found or empty. Place your dataset at `steel_dataset 1.csv` or set REF_CSV.")
         else:
-            process_col_candidates = [c for c in ["process","route","notes","treatment","processing","description"] if c in ref_df.columns]
-            process_col = process_col_candidates[0] if process_col_candidates else None
+            # Pick the best process text column (if any)
+            proc_col = None
+            for c in ["process","route","notes","treatment","processing","description"]:
+                if c in ref_df.columns:
+                    proc_col = c; break
 
             ranked = rank_suggestions(
-                ref_df, st.session_state.get("comp", {}),
-                preds, process_col,
-                st.session_state.get("process_query",""),
-                st.session_state.get("query_mode","AND"),
+                ref_df,
+                st.session_state.get("comp", {}),
+                preds,
+                proc_col,
+                st.session_state.get("process_query", ""),
+                st.session_state.get("query_mode", "AND"),
                 topk=10
             )
             if ranked.empty:
-                st.info("No suggestions match your filters. Try adjusting the process text or ensure columns exist in the CSV.")
+                st.info("No suggestions match your filters. Try adjusting the process text or ensure expected columns exist in the CSV.")
             else:
                 st.dataframe(ranked, use_container_width=True)
-                st.download_button("⬇️ Download suggestions", ranked.to_csv(index=False).encode("utf-8"),
-                                   "suggested_alloys.csv", "text/csv")
+                st.download_button(
+                    "⬇️ Download suggestions",
+                    ranked.to_csv(index=False).encode("utf-8"),
+                    "suggested_alloys.csv",
+                    "text/csv"
+                )
 
-# Optional: quick view of feature importances if provided
+# Optional: feature importances expander
 if Path(FI_CSV).exists():
     try:
         fi_df = pd.read_csv(FI_CSV)
@@ -402,3 +419,4 @@ if Path(FI_CSV).exists():
             st.dataframe(fi_df.head(50), use_container_width=True)
     except Exception:
         pass
+
