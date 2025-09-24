@@ -1,5 +1,5 @@
 # Build updated app.py with requested UI and behavior changes
-app_code = import os, io, re, sys, subprocess
+import os, io, re, sys, subprocess
 from pathlib import Path
 from typing import List, Dict, Any
 
